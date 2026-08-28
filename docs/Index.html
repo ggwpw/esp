@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Relay</title>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #0d0d0d;
+    color: #eee;
+    text-align: center;
+    padding: 30px 16px;
+    margin: 0;
+  }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+  #connStatus { color: #888; font-size: 14px; margin-bottom: 30px; }
+  #connStatus.connected { color: #2ecc71; }
+
+  .relay-card {
+    background: #1b1b1b;
+    border-radius: 16px;
+    padding: 20px;
+    margin: 0 auto 20px auto;
+    max-width: 320px;
+  }
+  .relay-name { font-size: 16px; margin-bottom: 14px; }
+  .toggle {
+    width: 100%;
+    padding: 18px;
+    font-size: 18px;
+    border-radius: 12px;
+    border: none;
+    color: #fff;
+    background: #444;
+    transition: background 0.2s;
+  }
+  .toggle.on { background: #2ecc71; }
+  .toggle:active { opacity: 0.8; }
+
+  #connectBtn {
+    padding: 14px 30px;
+    font-size: 16px;
+    border-radius: 12px;
+    border: none;
+    background: #3498db;
+    color: #fff;
+    margin-bottom: 20px;
+  }
+  #connectBtn:disabled { background: #333; color: #777; }
+</style>
+</head>
+<body>
+
+<h1>Управление реле ESP32</h1>
+<div id="connStatus">Не подключено</div>
+<button id="connectBtn">Подключиться по Bluetooth</button>
+
+<div class="relay-card">
+  <div class="relay-name">Реле 1</div>
+  <button class="toggle" id="btn1" disabled>—</button>
+</div>
+
+<div class="relay-card">
+  <div class="relay-name">Реле 2</div>
+  <button class="toggle" id="btn2" disabled>—</button>
+</div>
+
+<script>
+const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // пишем сюда
+const TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // получаем отсюда
+
+let rxChar, device;
+let state1 = false, state2 = false;
+
+const connectBtn = document.getElementById('connectBtn');
+const connStatus = document.getElementById('connStatus');
+const btn1 = document.getElementById('btn1');
+const btn2 = document.getElementById('btn2');
+
+function renderButtons() {
+  btn1.textContent = state1 ? "ВКЛЮЧЕНО" : "ВЫКЛЮЧЕНО";
+  btn1.classList.toggle('on', state1);
+  btn2.textContent = state2 ? "ВКЛЮЧЕНО" : "ВЫКЛЮЧЕНО";
+  btn2.classList.toggle('on', state2);
+}
+
+function handleNotify(event) {
+  const value = new TextDecoder().decode(event.target.value);
+  // формат от ESP32: "1:ON,2:OFF"
+  const parts = value.split(',');
+  parts.forEach(p => {
+    if (p.startsWith('1:')) state1 = p.includes('ON');
+    if (p.startsWith('2:')) state2 = p.includes('ON');
+  });
+  renderButtons();
+}
+
+async function sendCmd(cmd) {
+  if (!rxChar) return;
+  const data = new TextEncoder().encode(cmd);
+  await rxChar.writeValue(data);
+}
+
+connectBtn.addEventListener('click', async () => {
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: "ESP32-Relay" }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    rxChar = await service.getCharacteristic(RX_UUID);
+    const txChar = await service.getCharacteristic(TX_UUID);
+
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', handleNotify);
+
+    connStatus.textContent = "Подключено";
+    connStatus.classList.add('connected');
+    connectBtn.disabled = true;
+    btn1.disabled = false;
+    btn2.disabled = false;
+
+    device.addEventListener('gattserverdisconnected', () => {
+      connStatus.textContent = "Соединение разорвано";
+      connStatus.classList.remove('connected');
+      connectBtn.disabled = false;
+      btn1.disabled = true;
+      btn2.disabled = true;
+    });
+
+  } catch (err) {
+    connStatus.textContent = "Ошибка: " + err.message;
+  }
+});
+
+btn1.addEventListener('click', () => sendCmd(state1 ? "1off" : "1on"));
+btn2.addEventListener('click', () => sendCmd(state2 ? "2off" : "2on"));
+</script>
+
+</body>
+</html>
