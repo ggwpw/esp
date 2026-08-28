@@ -9,16 +9,21 @@
 
 const int RELAY1_PIN = 2;  // D2
 const int RELAY2_PIN = 4;  // D4
+const int LED_PIN    = 15; // D15 — индикатор поиска/подключения (отдельный от реле пин!)
 
 // Если реле включается по HIGH, а не по LOW — поменяйте местами значения
 const int RELAY_ON  = LOW;
 const int RELAY_OFF = HIGH;
+
+const unsigned long LED_BLINK_INTERVAL_MS = 300; // скорость мигания при поиске
 // =======================
 
-// Стандартные UUID сервиса Nordic UART Service (NUS)
+unsigned long lastBlinkTime = 0;
+bool ledState = false;
+
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E" // приём команд
-#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E" // ответы/статус
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
 BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
@@ -35,8 +40,9 @@ void sendStatus() {
 class ServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     deviceConnected = true;
+    digitalWrite(LED_PIN, HIGH); // подключено — горит ровно
     delay(300);
-    sendStatus(); // сразу шлём текущее состояние, чтобы страница отрисовала кнопки верно
+    sendStatus();
   }
   void onDisconnect(BLEServer* pServer) {
     deviceConnected = false;
@@ -54,7 +60,7 @@ class RxCallbacks: public BLECharacteristicCallbacks {
     else if (cmd == "1off") { relay1State = false; digitalWrite(RELAY1_PIN, RELAY_OFF); }
     else if (cmd == "2on")  { relay2State = true;  digitalWrite(RELAY2_PIN, RELAY_ON); }
     else if (cmd == "2off") { relay2State = false; digitalWrite(RELAY2_PIN, RELAY_OFF); }
-    else if (cmd == "status") { /* просто отправим статус ниже */ }
+    else if (cmd == "status") { }
 
     sendStatus();
   }
@@ -65,8 +71,10 @@ void setup() {
 
   pinMode(RELAY1_PIN, OUTPUT);
   pinMode(RELAY2_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
   digitalWrite(RELAY1_PIN, RELAY_OFF);
   digitalWrite(RELAY2_PIN, RELAY_OFF);
+  digitalWrite(LED_PIN, LOW);
 
   BLEDevice::init(DEVICE_NAME);
   BLEServer *pServer = BLEDevice::createServer();
@@ -91,5 +99,13 @@ void setup() {
 }
 
 void loop() {
+  if (!deviceConnected) {
+    unsigned long now = millis();
+    if (now - lastBlinkTime >= LED_BLINK_INTERVAL_MS) {
+      lastBlinkTime = now;
+      ledState = !ledState;
+      digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+    }
+  }
   delay(20);
 }
